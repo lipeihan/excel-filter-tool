@@ -1,6 +1,27 @@
 import pandas as pd
 from datetime import datetime, timedelta
 
+def robust_parse_date(x):
+    """Helper to parse dates with support for Chinese format YYYY年MM月DD日"""
+    if pd.isna(x):
+        return pd.NaT
+    if isinstance(x, datetime):
+        return x
+    
+    s = str(x).strip()
+    # Try Chinese format first if it looks like it
+    if '年' in s and '月' in s and '日' in s:
+        try:
+            return datetime.strptime(s, '%Y年%m月%d日')
+        except ValueError:
+            pass
+    
+    # Fallback to pandas to_datetime for other formats
+    try:
+        return pd.to_datetime(s)
+    except:
+        return pd.NaT
+
 def filter_bonus_data():
     input_file = '输入数据.xlsx'
     output_template = '输出数据.xlsx'
@@ -30,6 +51,23 @@ def filter_bonus_data():
         df_managers = pd.read_excel(input_file, sheet_name='门店负责人')
         df_status = pd.read_excel(input_file, sheet_name='门店状态表')
         
+        # --- Pre-process Date Columns (Handle Chinese Dates) ---
+        print("Preprocessing date columns...")
+        
+        # 1. Store Status Dates
+        for col in ['开始营业', '闭店时间']:
+            if col in df_status.columns:
+                df_status[col] = df_status[col].apply(robust_parse_date)
+                
+        # 2. Basic Info Dates
+        for col in ['入职日期', '转正日期', '离职日期']:
+            if col in df_basic.columns:
+                df_basic[col] = df_basic[col].apply(robust_parse_date)
+
+        # 3. Cert Dates
+        if '生效日期' in df_certs.columns:
+            df_certs['生效日期'] = df_certs['生效日期'].apply(robust_parse_date)
+            
         # Load template columns
         df_template = pd.read_excel(output_template, nrows=0)
         output_cols = df_template.columns.tolist()
@@ -40,22 +78,33 @@ def filter_bonus_data():
 
     # Determine Bonus Month
     # Look for '奖金月份' column in df_filter
-    bonus_month_str = "2025-11" # Default
+    BONUS_MONTH_START = datetime(2025, 11, 1) # Default
+    
     if '奖金月份' in df_filter.columns:
         first_val = df_filter['奖金月份'].dropna().iloc[0] if not df_filter['奖金月份'].dropna().empty else None
+        
         if first_val:
-            if isinstance(first_val, datetime):
-                bonus_month_str = first_val.strftime('%Y-%m')
+            # Try robust parse first (handles YYYY-MM-DD or YYYY年MM月DD日)
+            parsed_date = robust_parse_date(first_val)
+            
+            if pd.notna(parsed_date):
+                 BONUS_MONTH_START = parsed_date.replace(day=1)
             else:
-                bonus_month_str = str(first_val).strip()
-    
-    try:
-        # Parse YYYY-MM and set to 1st of that month
-        BONUS_MONTH_START = datetime.strptime(bonus_month_str, '%Y-%m')
-        print(f"Calculating bonus for month starting: {BONUS_MONTH_START.date()}")
-    except ValueError:
-        print(f"Invalid Bonus Month format: {bonus_month_str}. Using default 2025-11-01.")
-        BONUS_MONTH_START = datetime(2025, 11, 1)
+                 # Try parsing 'YYYY-MM' or 'YYYY年MM月' (without day)
+                 s = str(first_val).strip()
+                 try:
+                     if '年' in s and '月' in s:
+                         # Handle '2025年11月'
+                         dt = datetime.strptime(s, '%Y年%m月')
+                         BONUS_MONTH_START = dt
+                     else:
+                         # Handle '2025-11'
+                         dt = datetime.strptime(s, '%Y-%m')
+                         BONUS_MONTH_START = dt
+                 except:
+                     print(f"Warning: Could not parse bonus month '{s}'. Using default 2025-11-01.")
+
+    print(f"Calculating bonus for month starting: {BONUS_MONTH_START.date()}")
 
     # --- Pre-calculate Aggregated Hours per Employee (Before Filtering) ---
     print("Calculating aggregated hours per employee...")
@@ -209,17 +258,7 @@ def filter_bonus_data():
                     # Check date: Cert Date < Bonus Month Start
                     # "符合条件的次月参与" -> Cert Date must be in previous month or earlier
                     # effectively: Cert Date < Start of Bonus Month
-                    cert_date = user_certs[t_cert]
-                    if not isinstance(cert_date, datetime):
-                        # Try to parse or convert if it's a string
-                        try:
-                             cert_date = pd.to_datetime(cert_date).to_pydatetime()
-                        except:
-                             # If conversion fails, ignore this cert or assume valid?
-                             # Let's assume invalid date means not applicable
-                             continue
-                             
-                    if cert_date < BONUS_MONTH_START:
+                    if user_certs[t_cert] < BONUS_MONTH_START:
                         return True
             return False
 
