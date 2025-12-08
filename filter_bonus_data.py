@@ -305,6 +305,10 @@ def filter_bonus_data():
     # Prepare lookups
     # Drop duplicates to ensure unique index for to_dict
     if '工号' in df_basic.columns:
+        dup_basic = df_basic[df_basic.duplicated(subset=['工号'], keep=False)]
+        if not dup_basic.empty:
+            print(f"Warning: Found duplicate '工号' in '基本数据'. Count: {len(dup_basic)}. Keeping first occurrence.")
+            # print(dup_basic['工号'].unique()) # Optional: print duplicate IDs
         df_basic = df_basic.drop_duplicates(subset=['工号'])
     basic_lookup = df_basic.set_index('工号').to_dict('index')
     
@@ -319,12 +323,18 @@ def filter_bonus_data():
             status_key = None
             
     if status_key:
+        dup_status = df_status[df_status.duplicated(subset=[status_key], keep=False)]
+        if not dup_status.empty:
+             print(f"Warning: Found duplicate '{status_key}' in '门店状态表'. Count: {len(dup_status)}. Keeping first occurrence.")
         df_status = df_status.drop_duplicates(subset=[status_key])
         status_lookup = df_status.set_index(status_key).to_dict('index')
     else:
         status_lookup = {}
         
     if '部门编号' in df_managers.columns:
+        dup_managers = df_managers[df_managers.duplicated(subset=['部门编号'], keep=False)]
+        if not dup_managers.empty:
+            print(f"Warning: Found duplicate '部门编号' in '门店负责人'. Count: {len(dup_managers)}. Keeping first occurrence.")
         df_managers = df_managers.drop_duplicates(subset=['部门编号'])
     manager_lookup = df_managers.set_index('部门编号').to_dict('index')
     
