@@ -304,7 +304,22 @@ def filter_bonus_data():
     
     # Prepare lookups
     basic_lookup = df_basic.set_index('工号').to_dict('index')
-    status_lookup = df_status.set_index('ERP门店编码').to_dict('index') # Assuming 'ERP门店编码' matches '门店编码'
+    
+    # Verify '门店状态表' key column
+    status_key = 'ERP门店编码'
+    if status_key not in df_status.columns:
+        # Fallback: check if '门店编码' exists
+        if '门店编码' in df_status.columns:
+            status_key = '门店编码'
+        else:
+            print(f"Warning: Could not find '{status_key}' in '门店状态表'. Available: {list(df_status.columns)}")
+            status_key = None
+            
+    if status_key:
+        status_lookup = df_status.set_index(status_key).to_dict('index')
+    else:
+        status_lookup = {}
+        
     manager_lookup = df_managers.set_index('部门编号').to_dict('index')
     
     for _, row in df_result_source.iterrows():
