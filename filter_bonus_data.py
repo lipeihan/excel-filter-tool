@@ -50,6 +50,11 @@ def filter_bonus_data():
         df_basic = pd.read_excel(input_file, sheet_name='基本数据')
         df_managers = pd.read_excel(input_file, sheet_name='门店负责人')
         df_status = pd.read_excel(input_file, sheet_name='门店状态表')
+        try:
+            df_roster = pd.read_excel(input_file, sheet_name='花名册')
+        except:
+            print("Warning: Could not find '花名册' sheet. Fallback logic will be skipped.")
+            df_roster = pd.DataFrame()
         
         # --- Pre-process Date Columns (Handle Chinese Dates) ---
         print("Preprocessing date columns...")
@@ -64,7 +69,13 @@ def filter_bonus_data():
             if col in df_basic.columns:
                 df_basic[col] = df_basic[col].apply(robust_parse_date)
 
-        # 3. Cert Dates
+        # 3. Roster Dates
+        if not df_roster.empty:
+            for col in ['入职日期', '转正日期', '离职日期']:
+                if col in df_roster.columns:
+                    df_roster[col] = df_roster[col].apply(robust_parse_date)
+
+        # 4. Cert Dates
         if '生效日期' in df_certs.columns:
             df_certs['生效日期'] = df_certs['生效日期'].apply(robust_parse_date)
             
@@ -194,7 +205,8 @@ def filter_bonus_data():
     
     # Certifications: Group by Employee ID and collect list of valid certs with dates
     # Valid Certs: Status == '有效'
-    # valid_certs structure: {emp_id: {cert_name: effective_date}}
+    # valid_certs structure: {emp_id: {cert_name: earliest_effective_date}}
+    # We store the EARLIEST date for each cert type to maximize eligibility chances.
     valid_certs = {}
     if '生效日期' in df_certs.columns:
         for _, row in df_certs[df_certs['状态'] == '有效'].iterrows():
@@ -205,7 +217,13 @@ def filter_bonus_data():
                 continue
             if eid not in valid_certs:
                 valid_certs[eid] = {}
-            valid_certs[eid][cname] = cdate
+            
+            # Keep the earliest date if multiple records exist for same cert name
+            if cname in valid_certs[eid]:
+                if cdate < valid_certs[eid][cname]:
+                    valid_certs[eid][cname] = cdate
+            else:
+                valid_certs[eid][cname] = cdate
     else:
         print("Warning: '生效日期' column not found in '过岗数据'. Using certificate existence only (ignoring date).")
         # Fallback: Use a very old date so date check always passes
@@ -216,10 +234,58 @@ def filter_bonus_data():
                 valid_certs[eid] = {}
             valid_certs[eid][cname] = datetime(2000, 1, 1)
 
-    target_certs = {'【奈雪】大堂服务岗证书', '【奈雪】后厨岗证书', '【奈雪】水吧岗证书'}
+    # Define Target Cert Sets
+    tea_master_certs_required = {'【奈雪】大堂服务岗证书', '【奈雪】后厨岗证书', '【奈雪】水吧岗证书'}
+    
+    # --- Prepare Lookups (Handle Duplicates) ---
+    # Drop duplicates to ensure unique index for to_dict
+    if '工号' in df_basic.columns:
+        dup_basic = df_basic[df_basic.duplicated(subset=['工号'], keep=False)]
+        if not dup_basic.empty:
+            print(f"Warning: Found duplicate '工号' in '基本数据'. Count: {len(dup_basic)}. Keeping first occurrence.")
+        df_basic = df_basic.drop_duplicates(subset=['工号'])
+    basic_lookup = df_basic.set_index('工号').to_dict('index')
+    
+    # Verify '门店状态表' key column
+    status_key = 'ERP门店编码'
+    if status_key not in df_status.columns:
+        # Fallback: check if '门店编码' exists
+        if '门店编码' in df_status.columns:
+            status_key = '门店编码'
+        else:
+            print(f"Warning: Could not find '{status_key}' in '门店状态表'. Available: {list(df_status.columns)}")
+            status_key = None
+            
+    if status_key:
+        dup_status = df_status[df_status.duplicated(subset=[status_key], keep=False)]
+        if not dup_status.empty:
+             print(f"Warning: Found duplicate '{status_key}' in '门店状态表'. Count: {len(dup_status)}. Keeping first occurrence.")
+        df_status = df_status.drop_duplicates(subset=[status_key])
+        status_lookup = df_status.set_index(status_key).to_dict('index')
+    else:
+        status_lookup = {}
+        
+    if '部门编号' in df_managers.columns:
+        dup_managers = df_managers[df_managers.duplicated(subset=['部门编号'], keep=False)]
+        if not dup_managers.empty:
+            print(f"Warning: Found duplicate '部门编号' in '门店负责人'. Count: {len(dup_managers)}. Keeping first occurrence.")
+        df_managers = df_managers.drop_duplicates(subset=['部门编号'])
+    manager_lookup = df_managers.set_index('部门编号').to_dict('index')
+
+    # Roster Lookup
+    roster_lookup = {}
+    if not df_roster.empty and '工号' in df_roster.columns:
+        dup_roster = df_roster[df_roster.duplicated(subset=['工号'], keep=False)]
+        if not dup_roster.empty:
+            print(f"Warning: Found duplicate '工号' in '花名册'. Count: {len(dup_roster)}. Keeping first occurrence.")
+        df_roster = df_roster.drop_duplicates(subset=['工号'])
+        roster_lookup = df_roster.set_index('工号').to_dict('index')
 
     # Entry Dates: Map ID to Entry Date
-    entry_dates = df_basic.set_index('工号')['入职日期'].to_dict()
+    # Use the cleaned df_basic or basic_lookup
+    # entry_dates = df_basic.set_index('工号')['入职日期'].to_dict() # This is now safe as df_basic is deduplicated
+    # But better to use basic_lookup directly in logic
+    entry_dates = {k: v.get('入职日期') for k, v in basic_lookup.items()}
     
     # Store Managers: Map (StoreID, EmpID) to Boolean (True if manager of that store)
     # Check '门店负责人' sheet. '部门编号' is store code, '店长' is EmpID.
@@ -232,71 +298,117 @@ def filter_bonus_data():
     for idx, row in df_hours.iterrows():
         emp_id = row.get('工号')
         name = row.get('姓名')
-        job_title = str(row.get('职位名称', '')).strip()
+        
+        # Job Title Logic: Prefer '基本数据' > '工时数据'
+        basic_info = basic_lookup.get(emp_id, {})
+        job_title = str(basic_info.get('职位', '')).strip()
+        if not job_title or job_title == 'nan':
+             job_title = str(row.get('职位名称', '')).strip()
+        
         store_code = row.get('门店编码')
         
         # Use aggregated hours for logic checks
-        # row['总工时'] is specific to this store, but eligibility might depend on total across all stores
         monthly_hours = emp_agg_monthly.get(emp_id, 0)
         total_hours = emp_agg_total.get(emp_id, 0)
-        
-        # Original logic used row-specific values. We override them with aggregated values for CONDITION CHECKING ONLY.
-        # Note: If the output needs to show the aggregated value, we should update 'row' or the result dict later.
-        # Based on user request: "如果同个人在不同门店都有工时，应该算出总工时" -> implies the criteria uses the sum.
         
         is_eligible = False
         reason = ""
 
-        # Helper to check certs
-        # Returns True if any target cert was obtained BEFORE Bonus Month
-        def has_valid_cert(eid):
-            if eid not in valid_certs:
-                return False
-            user_certs = valid_certs[eid]
-            for t_cert in target_certs:
-                if t_cert in user_certs:
-                    # Check date: Cert Date < Bonus Month Start
-                    # "符合条件的次月参与" -> Cert Date must be in previous month or earlier
-                    # effectively: Cert Date < Start of Bonus Month
-                    if user_certs[t_cert] < BONUS_MONTH_START:
-                        return True
-            return False
-
-        # --- Rule 1: Tea Master (茶饮师, 茶饮师（S）) ---
-        if job_title in ['茶饮师', '茶饮师（S）']:
-            if has_valid_cert(emp_id):
-                is_eligible = True
-                reason = "Tea Master with Valid Cert (Pre-Bonus Month)"
+        # --- Rule 1: Tea Master & Trainers ---
+        # "茶饮师 / 茶饮师（S）/pro训练员/茶饮训练员"
+        if job_title in ['茶饮师', '茶饮师（S）', 'pro训练员', '茶饮训练员']:
+            # Condition: Must have ALL 3 certificates
+            # Judgment Date: The LATEST of the 3 certificates.
+            if emp_id in valid_certs:
+                user_c = valid_certs[emp_id]
+                has_all = True
+                dates = []
+                for req_c in tea_master_certs_required:
+                    if req_c not in user_c:
+                        has_all = False
+                        break
+                    # Ensure date is valid datetime
+                    c_date = user_c[req_c]
+                    if isinstance(c_date, datetime):
+                        dates.append(c_date)
+                    else:
+                        # Try to parse if string
+                        parsed = robust_parse_date(c_date)
+                        if pd.notna(parsed):
+                            dates.append(parsed)
+                        else:
+                             # Invalid date counts as missing for logic safety
+                             has_all = False
+                             break
+                
+                if has_all:
+                    # Logic: "证书取3个证书中最晚拿到的时间作为判断"
+                    latest_cert_date = max(dates)
+                    if latest_cert_date < BONUS_MONTH_START:
+                        is_eligible = True
+                        reason = f"Tea Master: All 3 certs acquired by {latest_cert_date.date()}"
+                    else:
+                        reason = f"Tea Master: Certs too new ({latest_cert_date.date()} >= {BONUS_MONTH_START.date()})"
+                else:
+                    reason = "Tea Master: Missing one or more required certs"
             else:
-                reason = "Tea Master: Missing Cert or Cert too new"
+                reason = "Tea Master: No certs found"
 
-        # --- Rule 2: Part-time (兼职) ---
-        # Assumption: Job title contains '兼职'
-        elif '兼职' in job_title:
+        # --- Rule 2: Part-time & Interns ---
+        # "兼职 (职位名称包含“兼职”)/就业见习生"
+        elif '兼职' in job_title or job_title == '就业见习生':
             # Condition 1: Total Hours >= 40
-            # Condition 2: Has Valid Cert (Pre-Bonus Month)
-            # "以上条件都满足，次月参与" -> Assuming Total Hours is also a "status" check
-            # Condition 3: Monthly Hours >= 50 (Current Month)
+            # Condition 2: Has ANY of the 3 certificates
+            # Condition 3: Monthly Hours >= 50
+            
+            # Logic: "证书其中一个取最早拿到的时间作为判断"
             
             cond_hours_cumulative = (total_hours >= 40)
-            cond_cert = has_valid_cert(emp_id)
             cond_monthly_hours = (monthly_hours >= 50)
             
-            if cond_hours_cumulative and cond_cert:
-                if cond_monthly_hours:
-                    is_eligible = True
-                    reason = "Part-time Eligible"
-                else:
-                    reason = "Part-time: Monthly hours < 50"
+            has_any_cert = False
+            earliest_cert_date = None
+            
+            if emp_id in valid_certs:
+                user_c = valid_certs[emp_id]
+                found_dates = []
+                for req_c in tea_master_certs_required:
+                    if req_c in user_c:
+                        c_date = user_c[req_c]
+                        # Ensure date
+                        if isinstance(c_date, datetime):
+                            found_dates.append(c_date)
+                        else:
+                             parsed = robust_parse_date(c_date)
+                             if pd.notna(parsed):
+                                 found_dates.append(parsed)
+                
+                if found_dates:
+                    has_any_cert = True
+                    earliest_cert_date = min(found_dates)
+            
+            cond_cert_time = False
+            if has_any_cert and earliest_cert_date:
+                if earliest_cert_date < BONUS_MONTH_START:
+                    cond_cert_time = True
+            
+            if cond_hours_cumulative and cond_cert_time and cond_monthly_hours:
+                is_eligible = True
+                reason = "Part-time/Intern Eligible"
             else:
-                reason = f"Part-time: Total Hours<40 ({total_hours}) or Missing/New Cert"
+                reason_parts = []
+                if not cond_hours_cumulative: reason_parts.append(f"TotalHours({total_hours})<40")
+                if not cond_monthly_hours: reason_parts.append(f"MonthlyHours({monthly_hours})<50")
+                if not has_any_cert: reason_parts.append("No Cert")
+                elif not cond_cert_time: reason_parts.append(f"Cert too new ({earliest_cert_date.date()})")
+                reason = "Part-time: " + ", ".join(reason_parts)
 
         # --- Rule 3: Assistant Manager/Store Manager (副经理, 副店长) ---
         elif job_title in ['副经理', '副店长']:
             entry_date = entry_dates.get(emp_id)
             if pd.notna(entry_date):
                 # "入职满30天的次月参加分配"
-                # New Formula: (Entry + 29 days) < Start of Bonus Month
+                # Formula: (Entry + 29 days) < Start of Bonus Month
                 cutoff_date = entry_date + timedelta(days=29)
                 if cutoff_date < BONUS_MONTH_START:
                     is_eligible = True
@@ -306,8 +418,9 @@ def filter_bonus_data():
             else:
                 reason = "Assistant Manager: Missing Entry Date"
 
-        # --- Rule 4: Store Manager (店长, 店长（S）) ---
-        elif job_title in ['店长', '店长（S）']:
+        # --- Rule 4: Store Manager ---
+        # "店长 / 店长（S）/见习店长/资深店长"
+        elif job_title in ['店长', '店长（S）', '见习店长', '资深店长']:
             # "是否曾经带过店" -> Check if they are in manager_set matching THIS store
             if (store_code, emp_id) in manager_set:
                 is_eligible = True
@@ -341,42 +454,6 @@ def filter_bonus_data():
     
     final_data = []
     
-    # Prepare lookups
-    # Drop duplicates to ensure unique index for to_dict
-    if '工号' in df_basic.columns:
-        dup_basic = df_basic[df_basic.duplicated(subset=['工号'], keep=False)]
-        if not dup_basic.empty:
-            print(f"Warning: Found duplicate '工号' in '基本数据'. Count: {len(dup_basic)}. Keeping first occurrence.")
-            # print(dup_basic['工号'].unique()) # Optional: print duplicate IDs
-        df_basic = df_basic.drop_duplicates(subset=['工号'])
-    basic_lookup = df_basic.set_index('工号').to_dict('index')
-    
-    # Verify '门店状态表' key column
-    status_key = 'ERP门店编码'
-    if status_key not in df_status.columns:
-        # Fallback: check if '门店编码' exists
-        if '门店编码' in df_status.columns:
-            status_key = '门店编码'
-        else:
-            print(f"Warning: Could not find '{status_key}' in '门店状态表'. Available: {list(df_status.columns)}")
-            status_key = None
-            
-    if status_key:
-        dup_status = df_status[df_status.duplicated(subset=[status_key], keep=False)]
-        if not dup_status.empty:
-             print(f"Warning: Found duplicate '{status_key}' in '门店状态表'. Count: {len(dup_status)}. Keeping first occurrence.")
-        df_status = df_status.drop_duplicates(subset=[status_key])
-        status_lookup = df_status.set_index(status_key).to_dict('index')
-    else:
-        status_lookup = {}
-        
-    if '部门编号' in df_managers.columns:
-        dup_managers = df_managers[df_managers.duplicated(subset=['部门编号'], keep=False)]
-        if not dup_managers.empty:
-            print(f"Warning: Found duplicate '部门编号' in '门店负责人'. Count: {len(dup_managers)}. Keeping first occurrence.")
-        df_managers = df_managers.drop_duplicates(subset=['部门编号'])
-    manager_lookup = df_managers.set_index('部门编号').to_dict('index')
-    
     for _, row in df_result_source.iterrows():
         emp_id = row.get('工号')
         store_code = row.get('门店编码')
@@ -384,19 +461,52 @@ def filter_bonus_data():
         basic_info = basic_lookup.get(emp_id, {})
         store_info = status_lookup.get(store_code, {})
         manager_info = manager_lookup.get(store_code, {})
+        roster_info = roster_lookup.get(emp_id, {})
         
         new_row = {}
         new_row['工号'] = emp_id
         new_row['姓名'] = row.get('姓名')
-        new_row['身份证信息'] = basic_info.get('身份证号码')
+        
+        # Helper for fallback: if value is empty/null/nan, try roster
+        def get_with_fallback(primary_dict, primary_key, roster_dict, roster_key):
+            val = primary_dict.get(primary_key)
+            # Check if val is effectively empty
+            is_empty = False
+            if pd.isna(val):
+                is_empty = True
+            elif isinstance(val, str) and not val.strip():
+                is_empty = True
+            elif str(val).lower() == 'nan':
+                 is_empty = True
+                 
+            if is_empty:
+                return roster_dict.get(roster_key)
+            return val
+
+        new_row['身份证信息'] = get_with_fallback(basic_info, '身份证号码', roster_info, '身份证')
         new_row['门店编码'] = store_code
         new_row['部门'] = manager_info.get('部门名称')
-        new_row['第三方'] = "否" # Placeholder or logic needed? Template said "取基本数据:第三方" but Basic Data doesn't have it. Default to empty or check columns again.
-        new_row['工作地区'] = basic_info.get('工作地区')
-        new_row['职位'] = basic_info.get('职位') # Or use row['职位名称']? Template says "取基本数据:职位"
-        new_row['入职日期'] = basic_info.get('入职日期')
-        new_row['转正日期'] = basic_info.get('转正日期')
-        new_row['离职日期'] = basic_info.get('离职日期')
+        
+        # '第三方' fallback
+        # Basic Data '第三方公司' might be the key?
+        # My previous inspection showed '第三方公司' in Basic Data.
+        new_row['第三方'] = get_with_fallback(basic_info, '第三方公司', roster_info, '第三方公司')
+        
+        # '工作地区' fallback
+        new_row['工作地区'] = get_with_fallback(basic_info, '工作地区', roster_info, '工作城市')
+        
+        # '职位' fallback
+        # First try Basic Data '职位', then Roster '职位', then Source '职位名称'
+        val_job = get_with_fallback(basic_info, '职位', roster_info, '职位')
+        if pd.isna(val_job) or (isinstance(val_job, str) and not val_job.strip()) or str(val_job).lower() == 'nan':
+             val_job = row.get('职位名称')
+        new_row['职位'] = val_job
+        
+        # Dates fallback
+        new_row['入职日期'] = get_with_fallback(basic_info, '入职日期', roster_info, '入职日期')
+        new_row['转正日期'] = get_with_fallback(basic_info, '转正日期', roster_info, '转正日期')
+        new_row['离职日期'] = get_with_fallback(basic_info, '离职日期', roster_info, '离职日期')
+        
         new_row['组织类型'] = store_info.get('品牌') # Template: "取门店状态表的：品牌"
         new_row['所属区域'] = row.get('区域')
         new_row['负责人'] = row.get('区经理')
