@@ -194,7 +194,17 @@ def filter_bonus_data():
                     # Check date: Cert Date < Bonus Month Start
                     # "符合条件的次月参与" -> Cert Date must be in previous month or earlier
                     # effectively: Cert Date < Start of Bonus Month
-                    if user_certs[t_cert] < BONUS_MONTH_START:
+                    cert_date = user_certs[t_cert]
+                    if not isinstance(cert_date, datetime):
+                        # Try to parse or convert if it's a string
+                        try:
+                             cert_date = pd.to_datetime(cert_date).to_pydatetime()
+                        except:
+                             # If conversion fails, ignore this cert or assume valid?
+                             # Let's assume invalid date means not applicable
+                             continue
+                             
+                    if cert_date < BONUS_MONTH_START:
                         return True
             return False
 
