@@ -57,7 +57,16 @@ def filter_bonus_data():
         print(f"Invalid Bonus Month format: {bonus_month_str}. Using default 2025-11-01.")
         BONUS_MONTH_START = datetime(2025, 11, 1)
 
+    # --- Pre-calculate Aggregated Hours per Employee (Before Filtering) ---
+    print("Calculating aggregated hours per employee...")
+    # Group by '工号' and sum '总工时' and '考勤工时'
+    # Use fillna(0) to ensure numeric summation works
+    emp_agg_total = df_hours.groupby('工号')['总工时'].sum().to_dict() if '总工时' in df_hours.columns else {}
+    emp_agg_monthly = df_hours.groupby('工号')['考勤工时'].sum().to_dict() if '考勤工时' in df_hours.columns else {}
+    print(f"Aggregated hours calculated for {len(emp_agg_total)} employees.")
+
     # 2. Apply Filter (筛选条件)
+
     # If filter sheet is not empty, keep only matching rows in df_hours
     if not df_filter.empty and not df_filter.dropna(how='all').empty:
         print("Applying filters from '筛选条件'...")
@@ -177,8 +186,14 @@ def filter_bonus_data():
         job_title = str(row.get('职位名称', '')).strip()
         store_code = row.get('门店编码')
         
-        monthly_hours = row.get('考勤工时', 0)
-        total_hours = row.get('总工时', 0)
+        # Use aggregated hours for logic checks
+        # row['总工时'] is specific to this store, but eligibility might depend on total across all stores
+        monthly_hours = emp_agg_monthly.get(emp_id, 0)
+        total_hours = emp_agg_total.get(emp_id, 0)
+        
+        # Original logic used row-specific values. We override them with aggregated values for CONDITION CHECKING ONLY.
+        # Note: If the output needs to show the aggregated value, we should update 'row' or the result dict later.
+        # Based on user request: "如果同个人在不同门店都有工时，应该算出总工时" -> implies the criteria uses the sum.
         
         is_eligible = False
         reason = ""
