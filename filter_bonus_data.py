@@ -44,14 +44,31 @@ def filter_bonus_data():
             return
 
         print(f"Using main data sheet: {main_sheet_name}")
-        df_hours = pd.read_excel(input_file, sheet_name=main_sheet_name)
-        df_filter = pd.read_excel(input_file, sheet_name='筛选条件')
-        df_certs = pd.read_excel(input_file, sheet_name='过岗数据')
-        df_basic = pd.read_excel(input_file, sheet_name='基本数据')
-        df_managers = pd.read_excel(input_file, sheet_name='门店负责人')
-        df_status = pd.read_excel(input_file, sheet_name='门店状态表')
+        
+        # Optimize: Use the already opened 'xl' object to read sheets
+        # This prevents opening the large file multiple times
+        
+        print(f"Loading sheet: {main_sheet_name}...")
+        df_hours = pd.read_excel(xl, sheet_name=main_sheet_name)
+        
+        print("Loading sheet: 筛选条件...")
+        df_filter = pd.read_excel(xl, sheet_name='筛选条件')
+        
+        print("Loading sheet: 过岗数据...")
+        df_certs = pd.read_excel(xl, sheet_name='过岗数据')
+        
+        print("Loading sheet: 基本数据...")
+        df_basic = pd.read_excel(xl, sheet_name='基本数据')
+        
+        print("Loading sheet: 门店负责人...")
+        df_managers = pd.read_excel(xl, sheet_name='门店负责人')
+        
+        print("Loading sheet: 门店状态表...")
+        df_status = pd.read_excel(xl, sheet_name='门店状态表')
+        
         try:
-            df_roster = pd.read_excel(input_file, sheet_name='花名册')
+            print("Loading sheet: 花名册...")
+            df_roster = pd.read_excel(xl, sheet_name='花名册')
         except:
             print("Warning: Could not find '花名册' sheet. Fallback logic will be skipped.")
             df_roster = pd.DataFrame()
