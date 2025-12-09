@@ -290,7 +290,13 @@ def filter_bonus_data():
     # Store Managers: Map (StoreID, EmpID) to Boolean (True if manager of that store)
     # Check '门店负责人' sheet. '部门编号' is store code, '店长' is EmpID.
     # We can create a set of tuples (StoreCode, EmpID)
-    manager_set = set(zip(df_managers['部门编号'], df_managers['店长']))
+    # Ensure types are consistent (strings)
+    manager_set = set()
+    for _, row in df_managers.iterrows():
+        sc = row.get('部门编号')
+        eid = row.get('店长')
+        if pd.notna(sc) and pd.notna(eid):
+            manager_set.add((str(sc).strip(), str(eid).strip()))
 
     # 4. Logic Processing
     eligible_rows = []
@@ -311,6 +317,9 @@ def filter_bonus_data():
                 job_title = str(row.get('职位名称', '')).strip()
         
         store_code = row.get('门店编码')
+        
+        # Ensure store_code is string for consistent lookup
+        store_code_str = str(store_code).strip() if pd.notna(store_code) else ''
         
         # Use aggregated hours for logic checks
         monthly_hours = emp_agg_monthly.get(emp_id, 0)
@@ -426,12 +435,14 @@ def filter_bonus_data():
         # --- Rule 4: Store Manager ---
         # "店长 / 店长（S）/见习店长/资深店长"
         elif job_title in ['店长', '店长（S）', '见习店长', '资深店长']:
-            # "是否曾经带过店" -> Check if they are in manager_set matching THIS store
-            if (store_code, emp_id) in manager_set:
-                is_eligible = True
-                reason = "Store Manager Eligible"
-            else:
-                reason = "Store Manager: Not managing this store"
+            # Issue 2 Fix: Store Managers should always be eligible regardless of manager_set check
+            is_eligible = True
+            reason = "Store Manager: Auto-eligible"
+            # if (store_code, emp_id) in manager_set:
+            #     is_eligible = True
+            #     reason = "Store Manager Eligible"
+            # else:
+            #     reason = "Store Manager: Not managing this store"
         
         else:
             reason = f"Role '{job_title}' not covered by rules"
@@ -534,7 +545,7 @@ def filter_bonus_data():
         
         # '是否门店负责人'
         # "判断：门店负责人在的店长，用门店编码和工号判断"
-        is_manager = "是" if (store_code, emp_id) in manager_set else "否"
+        is_manager = "是" if (store_code_str, str(emp_id).strip()) in manager_set else "否"
         new_row['是否门店负责人'] = is_manager
         
         final_data.append(new_row)
