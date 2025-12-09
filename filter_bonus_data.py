@@ -347,7 +347,9 @@ def filter_bonus_data():
         if new_title != original_title:
             replaced_count += 1
             
-    df_hours['最终职位'] = final_job_titles
+    # Update '职位名称' directly as requested to ensure all downstream logic and output use the corrected title
+    df_hours['职位名称'] = final_job_titles
+    df_hours['最终职位'] = final_job_titles # Keep this for reference/debugging
     print(f"Job titles standardized. {replaced_count} rows updated with title from Basic/Roster data.")
 
     # 4. Logic Processing
@@ -359,8 +361,8 @@ def filter_bonus_data():
         emp_id = str(emp_id_raw).strip() if pd.notna(emp_id_raw) else ''
         name = row.get('姓名')
         
-        # Use the standardized job title
-        job_title = row['最终职位']
+        # Use the standardized job title (which is now in '职位名称' as well)
+        job_title = row['职位名称']
         
         # Debug print for specific title mismatch investigation
         if job_title == '调茶大咖':
@@ -382,8 +384,8 @@ def filter_bonus_data():
         reason = ""
 
         # --- Rule 1: Tea Master & Trainers ---
-        # "茶饮师 / 茶饮师（S）/pro训练员/茶饮训练员"
-        if job_title in ['茶饮师', '茶饮师（S）', 'pro训练员', '茶饮训练员']:
+        # "茶饮师 / 茶饮师（S）/Pro训练员/茶饮训练员"
+        if job_title in ['茶饮师', '茶饮师（S）', 'Pro训练员', '茶饮训练员']:
             # Condition: Must have ALL 3 certificates
             # Judgment Date: The LATEST of the 3 certificates.
             if emp_id in valid_certs:
