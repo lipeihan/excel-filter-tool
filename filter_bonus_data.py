@@ -523,8 +523,8 @@ def filter_bonus_data():
     
     if not eligible_rows:
         print("No eligible employees found.")
-        return
-
+        # Proceed to generate exclusion report even if no eligible employees
+    
     df_result_source = pd.DataFrame(eligible_rows)
     
     # Map to Output Columns
