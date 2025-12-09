@@ -47,6 +47,13 @@ def filter_bonus_data():
         df_hours = pd.read_excel(xl, sheet_name=main_sheet_name)
         df_filter = pd.read_excel(xl, sheet_name='筛选条件')
         df_certs = pd.read_excel(xl, sheet_name='过岗数据')
+        
+        # Normalize IDs in main data and certs to ensure consistent matching
+        if '工号' in df_hours.columns:
+            df_hours['工号'] = df_hours['工号'].astype(str).str.strip()
+        if '工号' in df_certs.columns:
+            df_certs['工号'] = df_certs['工号'].astype(str).str.strip()
+            
         df_basic = pd.read_excel(xl, sheet_name='基本数据')
         df_managers = pd.read_excel(xl, sheet_name='门店负责人')
         df_status = pd.read_excel(xl, sheet_name='门店状态表')
@@ -238,18 +245,20 @@ def filter_bonus_data():
     tea_master_certs_required = {'【奈雪】大堂服务岗证书', '【奈雪】后厨岗证书', '【奈雪】水吧岗证书'}
     
     # --- Prepare Lookups (Handle Duplicates) ---
-    # Drop duplicates to ensure unique index for to_dict
+    # Normalize keys to ensure consistent matching (string + strip)
+    
+    # 1. Basic Data
     if '工号' in df_basic.columns:
+        df_basic['工号'] = df_basic['工号'].astype(str).str.strip()
         dup_basic = df_basic[df_basic.duplicated(subset=['工号'], keep=False)]
         if not dup_basic.empty:
             print(f"Warning: Found duplicate '工号' in '基本数据'. Count: {len(dup_basic)}. Keeping first occurrence.")
         df_basic = df_basic.drop_duplicates(subset=['工号'])
     basic_lookup = df_basic.set_index('工号').to_dict('index')
     
-    # Verify '门店状态表' key column
+    # 2. Store Status Data
     status_key = 'ERP门店编码'
     if status_key not in df_status.columns:
-        # Fallback: check if '门店编码' exists
         if '门店编码' in df_status.columns:
             status_key = '门店编码'
         else:
@@ -257,6 +266,7 @@ def filter_bonus_data():
             status_key = None
             
     if status_key:
+        df_status[status_key] = df_status[status_key].astype(str).str.strip()
         dup_status = df_status[df_status.duplicated(subset=[status_key], keep=False)]
         if not dup_status.empty:
              print(f"Warning: Found duplicate '{status_key}' in '门店状态表'. Count: {len(dup_status)}. Keeping first occurrence.")
@@ -265,16 +275,21 @@ def filter_bonus_data():
     else:
         status_lookup = {}
         
+    # 3. Manager Data
     if '部门编号' in df_managers.columns:
+        df_managers['部门编号'] = df_managers['部门编号'].astype(str).str.strip()
         dup_managers = df_managers[df_managers.duplicated(subset=['部门编号'], keep=False)]
         if not dup_managers.empty:
             print(f"Warning: Found duplicate '部门编号' in '门店负责人'. Count: {len(dup_managers)}. Keeping first occurrence.")
         df_managers = df_managers.drop_duplicates(subset=['部门编号'])
+    if '店长' in df_managers.columns:
+        df_managers['店长'] = df_managers['店长'].astype(str).str.strip()
     manager_lookup = df_managers.set_index('部门编号').to_dict('index')
 
-    # Roster Lookup
+    # 4. Roster Data
     roster_lookup = {}
     if not df_roster.empty and '工号' in df_roster.columns:
+        df_roster['工号'] = df_roster['工号'].astype(str).str.strip()
         dup_roster = df_roster[df_roster.duplicated(subset=['工号'], keep=False)]
         if not dup_roster.empty:
             print(f"Warning: Found duplicate '工号' in '花名册'. Count: {len(dup_roster)}. Keeping first occurrence.")
@@ -303,7 +318,8 @@ def filter_bonus_data():
     excluded_rows = []
 
     for idx, row in df_hours.iterrows():
-        emp_id = row.get('工号')
+        emp_id_raw = row.get('工号')
+        emp_id = str(emp_id_raw).strip() if pd.notna(emp_id_raw) else ''
         name = row.get('姓名')
         
         # Job Title Logic: Prefer '基本数据' > '花名册' > '工时数据'
@@ -315,6 +331,9 @@ def filter_bonus_data():
             job_title = str(roster_info.get('职位', '')).strip()
             if not job_title or job_title.lower() == 'nan':
                 job_title = str(row.get('职位名称', '')).strip()
+                # Debug print for specific title mismatch investigation
+                if job_title == '调茶大咖':
+                     print(f"Debug: Emp {emp_id} ({name}) fell back to '调茶大咖'. Basic: {basic_info.get('职位')}, Roster: {roster_info.get('职位')}")
         
         store_code = row.get('门店编码')
         
