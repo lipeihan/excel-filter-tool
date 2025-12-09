@@ -1,8 +1,31 @@
 import pandas as pd
 from datetime import datetime, timedelta
 
+def parse_dates_vectorized(series):
+    """
+    Vectorized date parsing to handle Chinese formats and standard formats efficiently.
+    Replaces row-by-row processing with whole-column operations.
+    """
+    if series.empty:
+        return series
+        
+    # If already datetime, return as is
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series
+        
+    # Convert to string (coercing NaNs to 'nan' which to_datetime handles)
+    s = series.astype(str).str.strip()
+    
+    # Replace Chinese format 'YYYY年MM月DD日' -> 'YYYY-MM-DD'
+    # We replace '年' and '月' with '-' and remove '日'
+    s = s.str.replace('年', '-', regex=False).str.replace('月', '-', regex=False).str.replace('日', '', regex=False)
+    
+    # Use pandas vectorized to_datetime
+    # errors='coerce' turns unparseable strings (like 'nan', 'NaT', garbage) into NaT
+    return pd.to_datetime(s, errors='coerce')
+
 def robust_parse_date(x):
-    """Helper to parse dates with support for Chinese format YYYY年MM月DD日"""
+    """Helper to parse dates with support for Chinese format YYYY年MM月DD日 (Scalar version)"""
     if pd.isna(x):
         return pd.NaT
     if isinstance(x, datetime):
@@ -69,22 +92,22 @@ def filter_bonus_data():
         # 1. Store Status Dates
         for col in ['开始营业', '闭店时间']:
             if col in df_status.columns:
-                df_status[col] = df_status[col].apply(robust_parse_date)
+                df_status[col] = parse_dates_vectorized(df_status[col])
                 
         # 2. Basic Info Dates
         for col in ['入职日期', '转正日期', '离职日期']:
             if col in df_basic.columns:
-                df_basic[col] = df_basic[col].apply(robust_parse_date)
+                df_basic[col] = parse_dates_vectorized(df_basic[col])
 
         # 3. Roster Dates
         if not df_roster.empty:
             for col in ['入职日期', '转正日期', '离职日期']:
                 if col in df_roster.columns:
-                    df_roster[col] = df_roster[col].apply(robust_parse_date)
+                    df_roster[col] = parse_dates_vectorized(df_roster[col])
 
         # 4. Cert Dates
         if '生效日期' in df_certs.columns:
-            df_certs['生效日期'] = df_certs['生效日期'].apply(robust_parse_date)
+            df_certs['生效日期'] = parse_dates_vectorized(df_certs['生效日期'])
             
         # Load template columns
         df_template = pd.read_excel(output_template, nrows=0)
