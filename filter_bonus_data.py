@@ -300,11 +300,15 @@ def filter_bonus_data():
         emp_id = row.get('工号')
         name = row.get('姓名')
         
-        # Job Title Logic: Prefer '基本数据' > '工时数据'
+        # Job Title Logic: Prefer '基本数据' > '花名册' > '工时数据'
         basic_info = basic_lookup.get(emp_id, {})
+        roster_info = roster_lookup.get(emp_id, {})
+
         job_title = str(basic_info.get('职位', '')).strip()
-        if not job_title or job_title == 'nan':
-             job_title = str(row.get('职位名称', '')).strip()
+        if not job_title or job_title.lower() == 'nan':
+            job_title = str(roster_info.get('职位', '')).strip()
+            if not job_title or job_title.lower() == 'nan':
+                job_title = str(row.get('职位名称', '')).strip()
         
         store_code = row.get('门店编码')
         
