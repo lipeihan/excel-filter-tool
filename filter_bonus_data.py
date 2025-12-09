@@ -311,6 +311,7 @@ def filter_bonus_data():
 
     # 4. Logic Processing
     eligible_rows = []
+    excluded_rows = []
 
     for idx, row in df_hours.iterrows():
         emp_id = row.get('工号')
@@ -453,7 +454,15 @@ def filter_bonus_data():
             eligible_rows.append(row)
             # print(f"kept: {emp_id} {name} ({job_title}) - {reason}")
         else:
-            pass
+            excluded_rows.append({
+                '工号': emp_id,
+                '姓名': name,
+                '职位': job_title,
+                '门店编码': store_code,
+                '总工时': total_hours,
+                '月工时': monthly_hours,
+                '排除原因': reason
+            })
             # print(f"dropped: {emp_id} {name} ({job_title}) - {reason}")
 
     # 5. Construct Output
@@ -558,6 +567,15 @@ def filter_bonus_data():
 
     df_final.to_excel(result_file, index=False)
     print(f"Successfully generated {result_file}")
+
+    # Write Exclusion Report
+    if excluded_rows:
+        exclusion_file = '筛选排除原因.xlsx'
+        df_excluded = pd.DataFrame(excluded_rows)
+        df_excluded.to_excel(exclusion_file, index=False)
+        print(f"Successfully generated {exclusion_file} with {len(excluded_rows)} excluded records.")
+    else:
+        print("No excluded employees found.")
 
 if __name__ == "__main__":
     try:
