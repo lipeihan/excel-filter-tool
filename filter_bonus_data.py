@@ -313,6 +313,43 @@ def filter_bonus_data():
         if pd.notna(sc) and pd.notna(eid):
             manager_set.add((str(sc).strip(), str(eid).strip()))
 
+    # --- Pre-process: Standardize Job Titles ---
+    # Replace job titles in df_hours with values from Basic Data > Roster Data > Original
+    print("Standardizing job titles based on Employee ID...")
+    
+    # We will create a new column '最终职位' (Final Job Title)
+    final_job_titles = []
+    replaced_count = 0
+    
+    for idx, row in df_hours.iterrows():
+        emp_id_raw = row.get('工号')
+        emp_id = str(emp_id_raw).strip() if pd.notna(emp_id_raw) else ''
+        original_title = str(row.get('职位名称', '')).strip()
+        
+        basic_info = basic_lookup.get(emp_id, {})
+        roster_info = roster_lookup.get(emp_id, {})
+        
+        # Priority: Basic > Roster > Original
+        new_title = str(basic_info.get('职位', '')).strip()
+        
+        # Check if basic title is valid
+        if not new_title or new_title.lower() == 'nan':
+            # Fallback to Roster
+            new_title = str(roster_info.get('职位', '')).strip()
+            
+            # Check if roster title is valid
+            if not new_title or new_title.lower() == 'nan':
+                # Fallback to Original
+                new_title = original_title
+        
+        final_job_titles.append(new_title)
+        
+        if new_title != original_title:
+            replaced_count += 1
+            
+    df_hours['最终职位'] = final_job_titles
+    print(f"Job titles standardized. {replaced_count} rows updated with title from Basic/Roster data.")
+
     # 4. Logic Processing
     eligible_rows = []
     excluded_rows = []
@@ -322,18 +359,15 @@ def filter_bonus_data():
         emp_id = str(emp_id_raw).strip() if pd.notna(emp_id_raw) else ''
         name = row.get('姓名')
         
-        # Job Title Logic: Prefer '基本数据' > '花名册' > '工时数据'
-        basic_info = basic_lookup.get(emp_id, {})
-        roster_info = roster_lookup.get(emp_id, {})
-
-        job_title = str(basic_info.get('职位', '')).strip()
-        if not job_title or job_title.lower() == 'nan':
-            job_title = str(roster_info.get('职位', '')).strip()
-            if not job_title or job_title.lower() == 'nan':
-                job_title = str(row.get('职位名称', '')).strip()
-                # Debug print for specific title mismatch investigation
-                if job_title == '调茶大咖':
-                     print(f"Debug: Emp {emp_id} ({name}) fell back to '调茶大咖'. Basic: {basic_info.get('职位')}, Roster: {roster_info.get('职位')}")
+        # Use the standardized job title
+        job_title = row['最终职位']
+        
+        # Debug print for specific title mismatch investigation
+        if job_title == '调茶大咖':
+             # Check why we ended up with '调茶大咖'
+             basic_info = basic_lookup.get(emp_id, {})
+             roster_info = roster_lookup.get(emp_id, {})
+             print(f"Debug: Emp {emp_id} ({name}) has title '调茶大咖'. Basic: {basic_info.get('职位')}, Roster: {roster_info.get('职位')}")
         
         store_code = row.get('门店编码')
         
@@ -539,10 +573,14 @@ def filter_bonus_data():
         new_row['工作地区'] = get_with_fallback(basic_info, '工作地区', roster_info, '工作城市')
         
         # '职位' fallback
-        # First try Basic Data '职位', then Roster '职位', then Source '职位名称'
-        val_job = get_with_fallback(basic_info, '职位', roster_info, '职位')
+        # Use the standardized '最终职位' which was computed earlier
+        # We still do a fallback check just in case, but '最终职位' is the source of truth for logic
+        val_job = row.get('最终职位')
         if pd.isna(val_job) or (isinstance(val_job, str) and not val_job.strip()) or str(val_job).lower() == 'nan':
-             val_job = row.get('职位名称')
+             # This shouldn't happen if standardized logic works, but as safety:
+             val_job = get_with_fallback(basic_info, '职位', roster_info, '职位')
+             if pd.isna(val_job) or (isinstance(val_job, str) and not val_job.strip()) or str(val_job).lower() == 'nan':
+                 val_job = row.get('职位名称')
         new_row['职位'] = val_job
         
         # Dates fallback
