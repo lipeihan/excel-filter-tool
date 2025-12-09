@@ -360,13 +360,13 @@ def filter_bonus_data():
                     latest_cert_date = max(dates)
                     if latest_cert_date < BONUS_MONTH_START:
                         is_eligible = True
-                        reason = f"Tea Master: All 3 certs acquired by {latest_cert_date.date()}"
+                        reason = f"茶饮师：3证齐全且符合时间要求 ({latest_cert_date.date()})"
                     else:
-                        reason = f"Tea Master: Certs too new ({latest_cert_date.date()} >= {BONUS_MONTH_START.date()})"
+                        reason = f"茶饮师：证书日期太新 ({latest_cert_date.date()} >= {BONUS_MONTH_START.date()})"
                 else:
-                    reason = "Tea Master: Missing one or more required certs"
+                    reason = "茶饮师：缺少必要的证书（需凑齐大堂、后厨、水吧）"
             else:
-                reason = "Tea Master: No certs found"
+                reason = "茶饮师：无任何有效证书"
 
         # --- Rule 2: Part-time & Interns ---
         # "兼职 (职位名称包含“兼职”)/就业见习生"
@@ -408,14 +408,14 @@ def filter_bonus_data():
             
             if cond_hours_cumulative and cond_cert_time and cond_monthly_hours:
                 is_eligible = True
-                reason = "Part-time/Intern Eligible"
+                reason = "兼职/实习生：符合资格"
             else:
                 reason_parts = []
-                if not cond_hours_cumulative: reason_parts.append(f"TotalHours({total_hours})<40")
-                if not cond_monthly_hours: reason_parts.append(f"MonthlyHours({monthly_hours})<50")
-                if not has_any_cert: reason_parts.append("No Cert")
-                elif not cond_cert_time: reason_parts.append(f"Cert too new ({earliest_cert_date.date()})")
-                reason = "Part-time: " + ", ".join(reason_parts)
+                if not cond_hours_cumulative: reason_parts.append(f"累计工时({total_hours})<40")
+                if not cond_monthly_hours: reason_parts.append(f"当月工时({monthly_hours})<50")
+                if not has_any_cert: reason_parts.append("无任何有效证书")
+                elif not cond_cert_time: reason_parts.append(f"证书日期太新 ({earliest_cert_date.date()})")
+                reason = "兼职/实习生：不符合条件 - " + ", ".join(reason_parts)
 
         # --- Rule 3: Assistant Manager/Store Manager (副经理, 副店长) ---
         elif job_title in ['副经理', '副店长']:
@@ -426,18 +426,18 @@ def filter_bonus_data():
                 cutoff_date = entry_date + timedelta(days=29)
                 if cutoff_date < BONUS_MONTH_START:
                     is_eligible = True
-                    reason = "Assistant Manager Eligible"
+                    reason = "副经理/副店长：符合入职时间要求"
                 else:
-                    reason = f"Assistant Manager: Not seasoned enough ({cutoff_date.date()} >= {BONUS_MONTH_START.date()})"
+                    reason = f"副经理/副店长：入职未满要求天数 ({cutoff_date.date()} >= {BONUS_MONTH_START.date()})"
             else:
-                reason = "Assistant Manager: Missing Entry Date"
+                reason = "副经理/副店长：缺少入职日期"
 
         # --- Rule 4: Store Manager ---
         # "店长 / 店长（S）/见习店长/资深店长"
         elif job_title in ['店长', '店长（S）', '见习店长', '资深店长']:
             # Issue 2 Fix: Store Managers should always be eligible regardless of manager_set check
             is_eligible = True
-            reason = "Store Manager: Auto-eligible"
+            reason = "店长类职位：自动符合资格"
             # if (store_code, emp_id) in manager_set:
             #     is_eligible = True
             #     reason = "Store Manager Eligible"
@@ -445,7 +445,7 @@ def filter_bonus_data():
             #     reason = "Store Manager: Not managing this store"
         
         else:
-            reason = f"Role '{job_title}' not covered by rules"
+            reason = f"职位 '{job_title}' 不在筛选规则范围内"
 
         if is_eligible:
             # Add to result
