@@ -406,11 +406,15 @@ def filter_bonus_data():
         is_eligible = False
         reason = ""
 
-        # --- Rule 1: Tea Master & Trainers ---
-        # "茶饮师 / 茶饮师（S）/Pro训练员/茶饮训练员"
-        if job_title in ['茶饮师', '茶饮师（S）', 'Pro训练员', '茶饮训练员']:
-            # Condition: Must have ALL 3 certificates
-            # Judgment Date: The LATEST of the 3 certificates.
+        # --- Rule 1: Full-time Positions (Consolidated) ---
+        # Roles: Tea Master, Trainer, Assistant Manager, Manager, Intern(School-Enterprise)
+        if job_title in ['茶饮师', '茶饮师（S）', 'Pro训练员', '茶饮训练员', 
+                          '副经理', '副店长', 
+                          '店长', '店长（S）', '见习店长', '资深店长', 
+                          '校企实习生']:
+            # Condition 1: Must have ALL 3 certificates
+            # Condition 2: Latest certificate date < Bonus Month Start
+            
             if emp_id in valid_certs:
                 user_c = valid_certs[emp_id]
                 has_all = True
@@ -438,15 +442,15 @@ def filter_bonus_data():
                     latest_cert_date = max(dates)
                     if latest_cert_date < BONUS_MONTH_START:
                         is_eligible = True
-                        reason = f"茶饮师：3证齐全且符合时间要求 ({latest_cert_date.date()})"
+                        reason = f"全职岗位：3证齐全且符合时间要求 ({latest_cert_date.date()})"
                     else:
-                        reason = f"茶饮师：证书日期太新 ({latest_cert_date.date()} >= {BONUS_MONTH_START.date()})"
+                        reason = f"全职岗位：证书日期太新 ({latest_cert_date.date()} >= {BONUS_MONTH_START.date()})"
                 else:
-                    reason = "茶饮师：缺少必要的证书（需凑齐大堂、后厨、水吧）"
+                    reason = "全职岗位：缺少必要的证书（需凑齐大堂、后厨、水吧）"
             else:
-                reason = "茶饮师：无任何有效证书"
+                reason = "全职岗位：无任何有效证书"
 
-        # --- Rule 2: Part-time & Interns ---
+        # --- Rule 2: Part-time & Job Practice Interns ---
         # "兼职 (职位名称包含“兼职”)/就业见习生"
         elif '兼职' in job_title or job_title == '就业见习生':
             # Condition 1: Total Hours >= 40
@@ -494,33 +498,6 @@ def filter_bonus_data():
                 if not has_any_cert: reason_parts.append("无任何有效证书")
                 elif not cond_cert_time: reason_parts.append(f"证书日期太新 ({earliest_cert_date.date()})")
                 reason = "兼职/实习生：不符合条件 - " + ", ".join(reason_parts)
-
-        # --- Rule 3: Assistant Manager/Store Manager (副经理, 副店长) ---
-        elif job_title in ['副经理', '副店长']:
-            entry_date = entry_dates.get(emp_id)
-            if pd.notna(entry_date):
-                # "入职满30天的次月参加分配"
-                # Formula: (Entry + 29 days) < Start of Bonus Month
-                cutoff_date = entry_date + timedelta(days=29)
-                if cutoff_date < BONUS_MONTH_START:
-                    is_eligible = True
-                    reason = "副经理/副店长：符合入职时间要求"
-                else:
-                    reason = f"副经理/副店长：入职未满要求天数 ({cutoff_date.date()} >= {BONUS_MONTH_START.date()})"
-            else:
-                reason = "副经理/副店长：缺少入职日期"
-
-        # --- Rule 4: Store Manager ---
-        # "店长 / 店长（S）/见习店长/资深店长"
-        elif job_title in ['店长', '店长（S）', '见习店长', '资深店长']:
-            # Issue 2 Fix: Store Managers should always be eligible regardless of manager_set check
-            is_eligible = True
-            reason = "店长类职位：自动符合资格"
-            # if (store_code, emp_id) in manager_set:
-            #     is_eligible = True
-            #     reason = "Store Manager Eligible"
-            # else:
-            #     reason = "Store Manager: Not managing this store"
         
         else:
             reason = f"职位 '{job_title}' 不在筛选规则范围内"
