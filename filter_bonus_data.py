@@ -195,13 +195,25 @@ def filter_bonus_data():
         # --- APPLY FILTERS ---
         
         # Get valid columns from filter sheet that also exist in combined data
-        valid_filter_cols = [col for col in df_filter.columns if col in df_combined.columns]
+        # Support flexible column names: if user says "门店编码", we also check "{main_sheet_name}-门店编码"
+        filter_cols_map = {} # User Column Name -> Actual Combined Column Name
+        
+        for col in df_filter.columns:
+            if col in df_combined.columns:
+                filter_cols_map[col] = col
+            else:
+                # Try prefixed
+                prefixed_col = f'{main_sheet_name}-{col}'
+                if prefixed_col in df_combined.columns:
+                    filter_cols_map[col] = prefixed_col
+        
+        valid_filter_cols = list(filter_cols_map.keys())
         
         if not valid_filter_cols:
             print(f"No matching columns found. Available columns in data: {list(df_combined.columns)[:10]}...")
             print("Ignoring filter.")
         else:
-            print(f"Using filter columns: {valid_filter_cols}")
+            print(f"Using filter columns: {valid_filter_cols} (mapped to actual data columns)")
             
             final_mask = pd.Series(False, index=df_combined.index)
             valid_filter_rows = df_filter.dropna(how='all')
@@ -210,13 +222,30 @@ def filter_bonus_data():
                 # Create a mask for this specific filter rule
                 rule_mask = pd.Series(True, index=df_combined.index)
                 
-                for col in valid_filter_cols:
-                    val = filter_row[col]
+                for user_col in valid_filter_cols:
+                    actual_col = filter_cols_map[user_col]
+                    val = filter_row[user_col]
+                    
                     # Skip if the filter value itself is NaN/Empty for this row
-                    if pd.isna(val):
+                    if pd.isna(val) or str(val).strip() == "":
                         continue
                         
-                    rule_mask &= (df_combined[col] == val)
+                    # Robust comparison to handle type mismatch (str vs int)
+                    # We compare both direct values and string representations
+                    col_data = df_combined[actual_col]
+                    
+                    # 1. Direct comparison
+                    match_mask = (col_data == val)
+                    
+                    # 2. String comparison (fallback for int vs str cases)
+                    s_val = str(val).strip()
+                    if s_val.endswith('.0'): s_val = s_val[:-2] # Handle 1001.0 -> 1001
+                    
+                    s_col = col_data.astype(str).str.strip()
+                    
+                    match_mask |= (s_col == s_val)
+                    
+                    rule_mask &= match_mask
                 
                 final_mask |= rule_mask
             
